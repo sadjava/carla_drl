@@ -12,7 +12,7 @@ class MonoDepthNet(nn.Module):
     """Network for monocular depth estimation.
     """
 
-    def __init__(self, path=None, features=256):
+    def __init__(self, path: str = None, features: int = 128):
         """Init.
 
         Args:
@@ -21,7 +21,7 @@ class MonoDepthNet(nn.Module):
         """
         super().__init__()
 
-        resnet = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
+        resnet = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
 
         self.pretrained = nn.Module()
         self.scratch = nn.Module()
@@ -34,16 +34,16 @@ class MonoDepthNet(nn.Module):
 
         # adjust channel number of feature maps
         self.scratch.layer1_rn = nn.Conv2d(
-            256, features, kernel_size=3, stride=1, padding=1, bias=False
+            64, features, kernel_size=3, stride=1, padding=1, bias=False
         )
         self.scratch.layer2_rn = nn.Conv2d(
-            512, features, kernel_size=3, stride=1, padding=1, bias=False
+            128, features, kernel_size=3, stride=1, padding=1, bias=False
         )
         self.scratch.layer3_rn = nn.Conv2d(
-            1024, features, kernel_size=3, stride=1, padding=1, bias=False
+            256, features, kernel_size=3, stride=1, padding=1, bias=False
         )
         self.scratch.layer4_rn = nn.Conv2d(
-            2048, features, kernel_size=3, stride=1, padding=1, bias=False
+            512, features, kernel_size=3, stride=1, padding=1, bias=False
         )
 
         self.scratch.refinenet4 = FeatureFusionBlock(features)
@@ -62,7 +62,7 @@ class MonoDepthNet(nn.Module):
         if path:
             self.load(path)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass.
 
         Args:
@@ -87,25 +87,40 @@ class MonoDepthNet(nn.Module):
         path_1 = self.scratch.refinenet1(path_2, layer_1_rn)
 
         out = self.scratch.output_conv(path_1)
+        return torch.sigmoid(out)
 
-        return out
+    def get_features(self, x: torch.Tensor) -> torch.Tensor:
+        """Forward pass.
 
-    def load(self, path):
+        Args:
+            x (tensor): input data (image)
+
+        Returns:
+            tensor: depth
+        """
+        layer_1 = self.pretrained.layer1(x)
+        layer_2 = self.pretrained.layer2(layer_1)
+        layer_3 = self.pretrained.layer3(layer_2)
+        layer_4 = self.pretrained.layer4(layer_3)
+
+        layer_4_rn = self.scratch.layer4_rn(layer_4)
+        return layer_4_rn
+
+    def load(self, path: str):
         """Load model from file.
 
         Args:
             path (str): file path
         """
-        parameters = torch.load(path)
 
-        self.load_state_dict(parameters)
+        self.load_state_dict(torch.load(path, map_location='cpu'))
 
 
 class Interpolate(nn.Module):
     """Interpolation module.
     """
 
-    def __init__(self, scale_factor, mode):
+    def __init__(self, scale_factor: float, mode: str):
         """Init.
 
         Args:
@@ -118,7 +133,7 @@ class Interpolate(nn.Module):
         self.scale_factor = scale_factor
         self.mode = mode
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass.
 
         Args:
@@ -136,7 +151,7 @@ class ResidualConvUnit(nn.Module):
     """Residual convolution module.
     """
 
-    def __init__(self, features):
+    def __init__(self, features: int):
         """Init.
 
         Args:
@@ -148,7 +163,7 @@ class ResidualConvUnit(nn.Module):
         self.conv2 = nn.Conv2d(features, features, kernel_size=3, stride=1, padding=1, bias=False)
         self.relu = nn.ReLU(inplace=True)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass.
 
         Args:
@@ -169,7 +184,7 @@ class FeatureFusionBlock(nn.Module):
     """Feature fusion block.
     """
 
-    def __init__(self, features):
+    def __init__(self, features: int):
         """Init.
 
         Args:
@@ -179,7 +194,7 @@ class FeatureFusionBlock(nn.Module):
 
         self.res_conf_unit = ResidualConvUnit(features)
 
-    def forward(self, *xs):
+    def forward(self, *xs: torch.Tensor) -> torch.Tensor:
         """Forward pass.
 
         Returns:
@@ -196,7 +211,7 @@ class FeatureFusionBlock(nn.Module):
 
         return output
 
-def resize_image(img):
+def resize_image(img: torch.Tensor) -> torch.Tensor:
     """Resize image and make it fit for network.
 
     Args:
@@ -225,7 +240,7 @@ def resize_image(img):
 
     return img_resized
 
-def resize_depth(depth, height, width):
+def resize_depth(depth: torch.Tensor, height: int, width: int) -> torch.Tensor:
     """Resize depth map tensor.
 
     Args:

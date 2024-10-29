@@ -3,9 +3,8 @@
 import glob
 import os
 import sys
-from scipy.spatial.transform import Rotation as R
-import math
 from carla import ColorConverter
+import argparse
 
 try:
     sys.path.append(glob.glob('../carla/dist/carla-*%d.%d-%s.egg' % (
@@ -116,11 +115,7 @@ def should_quit():
     return False
 
 
-def setCameraParams(camera):
-    sizeX = 1280
-    sizeY = 720
-    fov = 110
-
+def setCameraParams(camera, sizeX, sizeY, fov):
     camera.set_attribute('image_size_x', str(sizeX))
     camera.set_attribute('image_size_y', str(sizeY))
     camera.set_attribute('fov', str(fov))
@@ -129,56 +124,16 @@ def setCameraParams(camera):
 
     return camera
 
-
-def carla_transform_to_mat(carla_transform):
-    """
-    Convert a carla transform from a left-handed X-forward system (unreal)
-    to a right-handed Z-forward camera pose
-
-    :param carla_transform: the carla transform
-    :return: a numpy.array with 4x4 pose matrix
-    """
-    camToWorld = np.matrix([[0, 0, 1], [-1, 0, 0], [0, -1, 0]])
-    worldToCam = np.matrix([[0, -1, 0], [0, 0, -1], [1, 0, 0]])
-
-    # Identity pose
-    mat = np.eye(4)
-
-    # Position
-    mat[:3, 3] = worldToCam @ np.array([
-        carla_transform.location.x,
-        -carla_transform.location.y,
-        carla_transform.location.z])
-
-    # Rotation
-    roll = carla_transform.rotation.roll
-    pitch = -carla_transform.rotation.pitch
-    yaw = -carla_transform.rotation.yaw
-    worldCS = R.from_euler('xyz', [roll, pitch, yaw], degrees=True).as_matrix()
-
-    mat[:3, :3] = worldToCam @ worldCS @ camToWorld
-
-    return mat
-
-def append_camera_pose(frame_id, transform):
-    # time,x,y,z,lat,lon,altitude,pitch,yaw,roll
-    T = carla_transform_to_mat(transform)
-
-    rot = R.from_matrix(T[:3, :3]).as_quat()
-    trans = T[:3, 3]
-    with open('data/gt.tum','a+') as f:
-        f.write('%s %s %s %s %s %s %s %s\n' % (frame_id, trans[0], trans[1], trans[2], rot[0], rot[1], rot[2], rot[3]))
-
-def main(display_enabled=False):
+def main(display_enabled=False, record=True, record_fps=6, sizeX=480, sizeY=270,
+         fov=110, max_images=20, batch_size=10):
     # Parameters
-    record_fps = 6  # Define the record FPS variable
     T_vehicle_camera = carla.Transform(carla.Location(x=1, y=0.0, z=3), carla.Rotation(pitch=10, roll=0, yaw=0))
 
     actor_list = []
     if display_enabled:
         pygame.init()
         display = pygame.display.set_mode(
-            (1280, 720),
+            (sizeX, sizeY),
             pygame.HWSURFACE | pygame.DOUBLEBUF)
         font = get_font()
     clock = pygame.time.Clock()
@@ -187,7 +142,7 @@ def main(display_enabled=False):
     client.set_timeout(10.0)
 
     # Iterate over all towns
-    towns = client.get_available_maps()
+    towns = [t for t in client.get_available_maps() if t.endswith("Opt")]
     print(f"Available towns: {towns}")
     for town in towns:
         print(f"Loading town: {town}")
@@ -198,9 +153,8 @@ def main(display_enabled=False):
         weather_presets = [(name, param) for name, param in carla.WeatherParameters.__dict__.items() if isinstance(param, carla.WeatherParameters)]
         for weather_name, weather_param in weather_presets:
             # Check if the path for this town and weather combination already exists
-            town_name = os.path.basename(town)  # Extracts 'Default' from the path
-            base_path = f'data/rgb/{town_name}/{weather_name}'
-            print(f"Checking path: {base_path}")
+            town_name = os.path.basename(town)  # Extracts the name of the town from the path
+            base_path = f'data_{sizeX}x{sizeY}/rgb/{town_name}/{weather_name}'
             if os.path.exists(base_path):
                 print(f"Skipping {town_name} with weather {weather_name} as data already exists.")
                 continue
@@ -248,27 +202,25 @@ def main(display_enabled=False):
 
                 # Attach cameras to the main vehicle
                 camera_rgb = world.spawn_actor(
-                    setCameraParams(blueprint_library.find('sensor.camera.rgb')),
+                    setCameraParams(blueprint_library.find('sensor.camera.rgb'), sizeX, sizeY, fov),
                     T_vehicle_camera,
                     attach_to=vehicle)
                 actor_list.append(camera_rgb)
 
                 camera_depth = world.spawn_actor(
-                    setCameraParams(blueprint_library.find('sensor.camera.depth')),
+                    setCameraParams(blueprint_library.find('sensor.camera.depth'), sizeX, sizeY, fov),
                     T_vehicle_camera,
                     attach_to=vehicle)
                 actor_list.append(camera_depth)
 
                 camera_semseg = world.spawn_actor(
-                    setCameraParams(blueprint_library.find('sensor.camera.semantic_segmentation')),
+                    setCameraParams(blueprint_library.find('sensor.camera.semantic_segmentation'), sizeX, sizeY, fov),
                     T_vehicle_camera,
                     attach_to=vehicle)
                 actor_list.append(camera_semseg)
 
                 tick_counter = 0
                 counter = 0
-                max_images = 10
-                batch_size = 10
                 image_batches = {'rgb': [], 'depth': [], 'semseg': []}
                 current_location = vehicle.get_location()
                 waypoint = m.get_waypoint(current_location)
@@ -297,12 +249,12 @@ def main(display_enabled=False):
                             image_batches['depth'].append(image_depth)
                             image_batches['semseg'].append(image_semseg)
 
-                            # Save data in batches
-                            if len(image_batches['rgb']) >= batch_size:
+                            # Save data in batches if record is True
+                            if record and (len(image_batches['rgb']) >= batch_size or counter >= max_images):
                                 print(f"Saving batch of images, batch size: {batch_size}.")
                                 for image_type, images in image_batches.items():
-                                    town_name = os.path.basename(town)  # Extracts 'Default' from the path
-                                    base_path = f'data/{image_type}/{town_name}/{weather_name}'
+                                    town_name = os.path.basename(town)  # Extracts the name of the town from the path
+                                    base_path = f'data_{sizeX}x{sizeY}/{image_type}/{town_name}/{weather_name}'
                                     os.makedirs(base_path, exist_ok=True)
                                     for i, image in enumerate(images):
                                         index = counter - batch_size + i
@@ -312,19 +264,17 @@ def main(display_enabled=False):
                                             image.save_to_disk(f'{base_path}/{str(index).zfill(3)}')
                                         else:
                                             image.save_to_disk(f'{base_path}/{str(index).zfill(3)}')
-                                        if image_type == 'rgb':
-                                            append_camera_pose(index, camera_rgb.get_transform())
-                                    image_batches = {'rgb': [], 'depth': [], 'semseg': []}
+                                image_batches = {'rgb': [], 'depth': [], 'semseg': []}
 
                         if display_enabled:
                             # Draw the display.
                             draw_image(display, image_rgb)
                             draw_image(display, image_depth, blend=True)
                             display.blit(
-                                font.render('% 5d FPS (real)' % clock.get_fps(), True, (255, 255, 255)),
+                                font.render(f'{clock.get_fps():5.2f} FPS (real)', True, (255, 255, 255)),
                                 (8, 10))
                             display.blit(
-                                font.render('% 5d FPS (simulated)' % fps, True, (255, 255, 255)),
+                                font.render(f'{fps:5.2f} FPS (simulated)', True, (255, 255, 255)),
                                 (8, 28))
                             pygame.display.flip()
 
@@ -342,7 +292,28 @@ def main(display_enabled=False):
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='CARLA Synchronous Mode Example')
+    parser.add_argument('--display', action='store_true', help='Enable display')
+    parser.add_argument('--record', action='store_true', help='Save data')
+    parser.add_argument('--record-fps', type=int, default=6, help='FPS for recording data')
+    parser.add_argument('--width', type=int, default=480, help='Width of the camera image')
+    parser.add_argument('--height', type=int, default=270, help='Height of the camera image')
+    parser.add_argument('--fov', type=int, default=110, help='Field of view for the camera')
+    parser.add_argument('--max-images', type=int, default=20, help='Maximum number of images to capture')
+    parser.add_argument('--batch-size', type=int, default=10, help='Batch size for saving images')
+
+    args = parser.parse_args()
+
     try:
-        main(display_enabled=False)  # Set to True to enable display, False to disable
+        main(
+            display_enabled=args.display,
+            record=args.record,
+            record_fps=args.record_fps,
+            sizeX=args.width,
+            sizeY=args.height,
+            fov=args.fov,
+            max_images=args.max_images,
+            batch_size=args.batch_size
+        )
     except KeyboardInterrupt:
         print('\nCancelled by user. Bye!')

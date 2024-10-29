@@ -8,17 +8,31 @@ def test_midas_depth_estimation_model():
     model = MonoDepthNet()
     model.eval()
     with torch.no_grad():
-        image = torch.randn(1, 3, 360, 640)
+        image = torch.randn(1, 3, 270, 480)
+        N, _, H, W = image.shape
         x = resize_image(image)
         y = model(x)
-        depth = resize_depth(y, 360, 640)
-    assert depth.shape == (1, 1, 360, 640)
+        depth = resize_depth(y, H, W)
+    assert depth.shape == (N, 1, H, W)
     with torch.no_grad():
-        image = torch.randn(1, 3, 640, 360)
+        image = torch.randn(1, 3, 480, 270)
+        N, _, H, W = image.shape
         x = resize_image(image)
         y = model(x)
-        depth = resize_depth(y, 640, 360)
-    assert depth.shape == (1, 1, 640, 360)
+        depth = resize_depth(y, H, W)
+    assert depth.shape == (N, 1, H, W)
+    assert torch.all(torch.logical_and(depth >= 0, depth <= 1))
+
+def test_get_features():
+    """Test the get_features method of the MonoDepthNet model."""
+    model = MonoDepthNet()
+    model.eval()
+    with torch.no_grad():
+        image = torch.randn(1, 3, 270, 480)
+        N, _, H, W = image.shape
+        x = resize_image(image)
+        y = model.get_features(x)
+    assert y.shape == (N, 128, 7, 12)
 
 def test_load_midas_model():
     """Test the load method of the MonoDepthNet model."""

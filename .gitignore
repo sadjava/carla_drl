@@ -2,3 +2,6 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .coverage
+data_*x*/
+results/
+test_agent.pth

@@ -5,9 +5,10 @@ from PIL import Image
 import torch
 from torch.utils.data import Dataset
 from torchvision import transforms
+from typing import Tuple
 
 
-def rgb_to_depth(image):
+def rgb_to_depth(image: np.ndarray) -> np.ndarray:
     """
     Convert an RGB image to a depth image.
     """
@@ -19,28 +20,25 @@ class CarlaDepthEstimationDataset(Dataset):
     """
     Dataset for Carla depth estimation.
     """
-    def __init__(self, root, transform=None):
+    def __init__(self, root: str, joint_transform: transforms.Compose = None, input_transform: transforms.Compose = None):
         self.root = root
-        self.transform = transform
-        self.images = sorted(glob.glob(os.path.join(root, "rgb", "*.png")))
-        self.labels = sorted(glob.glob(os.path.join(root, "depth", "*.png")))
+        self.joint_transform = joint_transform
+        self.input_transform = input_transform
+        self.images = sorted(glob.glob(os.path.join(root, "rgb", "*", "*", "*.png")))
+        self.labels = sorted(glob.glob(os.path.join(root, "depth", "*", "*", "*.png")))
         for image, label in zip(self.images, self.labels):
             assert image.split("/")[-1] == label.split("/")[-1], "Image and label do not match"
-        self.post_transform = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        ])
-        
+
     def __len__(self):
         return len(self.images)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
         image = Image.open(self.images[idx]).convert("RGB")
-        depth = Image.open(self.labels[idx])
-        if self.transform:
-            image = self.transform(image)
-            depth = self.transform(depth)
+        depth  = Image.open(self.labels[idx])
+        if self.joint_transform:
+            image, depth = self.joint_transform(image, depth)
+        if self.input_transform:
+            image = self.input_transform(image)
         depth = rgb_to_depth(np.array(depth))
-        image = self.post_transform(image)
-        depth = torch.from_numpy(depth)
+        depth = torch.from_numpy(depth).unsqueeze(0)
         return image, depth

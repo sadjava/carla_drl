@@ -1,0 +1,8 @@
+[run]
+omit =
+    carla_drl/semantic_segmentation/train.py
+    carla_drl/semantic_segmentation/utils.py
+    carla_drl/depth_estimation/train.py
+    carla_drl/depth_estimation/utils.py
+    carla_drl/lane_following/train.py
+    carla_drl/lane_following/parameters.py
