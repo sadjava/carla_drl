@@ -117,8 +117,9 @@ class UNet(nn.Module):
         enc2 = self.enc2(enc1)
         enc3 = self.enc3(enc2)
         enc4 = self.enc4(enc3)
+        center = self.center(enc4)
 
-        return enc4
+        return center
     
     def load(self, path: str):
         """Load model from file.

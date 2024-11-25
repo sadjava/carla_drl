@@ -104,7 +104,8 @@ class MonoDepthNet(nn.Module):
         layer_4 = self.pretrained.layer4(layer_3)
 
         layer_4_rn = self.scratch.layer4_rn(layer_4)
-        return layer_4_rn
+        path_4 = self.scratch.refinenet4(layer_4_rn)
+        return path_4
 
     def load(self, path: str):
         """Load model from file.

@@ -13,8 +13,14 @@ Carla-DRL/
 ├── pytest.ini                  # Configuration for pytest, specifying test paths and options.
 ├── README.md                   # Main documentation file providing an overview and instructions.
 ├── measure_speed.py            # Script for measuring the speed of the agent in the simulation.
+├── tests/                      # Testing functions to carla_drl package
 ├── carla_drl/                  # Main package directory for the Carla DRL project.
 │   ├── __init__.py             # Marks the directory as a Python package.
+│   ├── autoencoder/            # Contains files related to depth estimation tasks.
+│   │   ├── __init__.py         # Marks the directory as a Python package.
+│   │   ├── dataset.py          # Dataset class for loading autoencoder data.
+│   │   ├── model.py            # Implements the Variational AutoEncoder model for image reconstruction.
+│   │   ├── train.py            # Training logic for the vae model.
 │   ├── depth_estimation/       # Contains files related to depth estimation tasks.
 │   │   ├── __init__.py         # Marks the directory as a Python package.
 │   │   ├── dataset.py          # Dataset class for loading depth estimation data.
@@ -44,3 +50,76 @@ Carla-DRL/
     └── workflows/              # Directory for workflow files.
         └── python-tests.yml    # Defines the workflow for running Python tests on push and pull request events.
 ```
+
+## About the Project
+This project develops an autonomous driving agent using reinforcement learning in the CARLA simulator. The agent will rely on visual features: predicted semantic maps and depth maps from sensor. These features, combined with vehicle data like velocity and steering, will serve as input for training a Proximal Policy Optimization (PPO) agent. The goal is to improve the agent's decision-making and navigation by leveraging enhanced visual understanding of the environment.
+
+## Installation
+The CARLA simulator needs to be installed. We are using [CARLA-0.9.14](https://github.com/carla-simulator/carla/releases/tag/0.9.14/).  
+Optionally, create virtual environment:
+```
+conda create -n carla_drl python=3.7.12 -y
+conda activate carla_drl
+```
+Set appropriate torch version and cuda compatability in pyproject.toml acording to your system.
+Then install all dependencies using poetry:
+```
+pip install poetry
+poetry install
+```
+## Usage
+
+To generate data for training semantic segmentation and depth estimation models, run:
+```
+python simulation/sync_data_generation.py
+```
+You can modify the code to collect data for your cases (town, weather, route, etc.)
+
+To train UNet for semantic segmentation task, run:
+```
+python carla_drl/semantic_segmentation/train.py py
+```
+
+To train MiDaS for depth estimation task, run:
+```
+python carla_drl/depth_estimation/train.py py
+```
+
+To train VAE for semantic segmentation masks, run:
+```
+python carla_drl/autoencoder/train.py 
+```
+and for depth maps, run:
+```
+python carla_drl/autoencoder/train.py --is_depth --log_dir results/autoencoder-depth/
+```
+
+To train PPO agent, set constant settings such as paths to models in ```carla_drl/lane_following/parameters.py``` and run:
+```
+python carla_drl/lane_following/train.py 
+```
+
+To test PPO agent, run:
+```
+python carla_drl/lane_following/train.py --train False --checkpoint-path path/to/checkpoint_dir
+```
+
+All training scripts uses tensorboard for logging. You can see training progress by running:
+```
+tensorboard --logdir results/...
+```
+
+## Results
+<p align="center"><img width="550" src="info/gifs/third_person.gif"> </p>
+<p align="center">Third person view of car</p>
+<div>
+</div>
+<p align="center"><img width="550" src="info/gifs/front_view.gif"> </p>
+<p align="center">First person view what model sees</p>
+
+### Pipeline
+![Pipeline](info/figures/pipeline.png)
+### Pretrained weights
+In this [link](https://drive.google.com/drive/folders/1W5mWDP-pCIErUsxOv-t-RM6a8BTmoX4c?usp=drive_link) you can find pretrained UNet, VAEs for semantic and depths maps and PPO agent weights.
+## Authors
+Dhzavid Sadreddinov, Pavel Volkov, Diana Vostrova, Alsu Khairullina

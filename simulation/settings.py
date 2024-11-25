@@ -1,6 +1,6 @@
 HOST = "0.0.0.0"
 PORT = 2000
-TIMEOUT = 20.0
+TIMEOUT = 3.0
 
 CAR_NAME = 'vehicle.audi.tt'
 EPISODE_LENGTH = 7500
@@ -13,5 +13,5 @@ RGB_CAMERA = 'sensor.camera.rgb'
 SS_CAMERA = 'sensor.camera.semantic_segmentation'
 DEPTH_CAMERA = 'sensor.camera.depth'
 
-IMAGE_SIZE_X = 480
-IMAGE_SIZE_Y = 270
+IMAGE_SIZE_X = 160
+IMAGE_SIZE_Y = 80

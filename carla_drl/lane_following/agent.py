@@ -1,87 +1,81 @@
-import torch 
+import os
 import numpy as np
-from typing import Tuple
 
+import torch
+import torch.nn as nn
 from carla_drl.lane_following.model import ActorCritic
-
+from carla_drl.lane_following.parameters import  *
 
 class Buffer:
     def __init__(self):
          # Batch data
-        self.ss_obs = []  
-        self.depth_obs = []  
-        self.nav_obs = []  
+        self.states = []  
         self.actions = []         
         self.log_probs = []     
         self.rewards = []         
         self.dones = []
 
     def clear(self):
-        del self.ss_obs[:]    
-        del self.depth_obs[:]    
-        del self.nav_obs[:]    
+        del self.states[:]  
         del self.actions[:]        
         del self.log_probs[:]      
         del self.rewards[:]
         del self.dones[:]
 
-class PPOAgent:
-    def __init__(self, 
-                 ss_channels: int = 128,
-                 depth_channels: int = 128,
-                 navigation_dim: int = 5,
-                 action_dim: int = 2,
-                 dropout: float = 0.2,
-                 learning_rate: float = 1e-4,
-                 batch_size: int = 64,
-                 gamma: float = 0.99,
-                 epsilon: float = 0.2,
-                 epoch_n: int = 30,
-                 device: str = 'cpu'
-                 ):
-        self.ss_channels = ss_channels
-        self.depth_channels = depth_channels
-        self.action_dim = action_dim
-
-        self.batch_size = batch_size
-        self.lr = learning_rate
-        self.gamma = gamma
-        self.epsilon = epsilon
-        self.epoch_n = epoch_n
-        self.device = device
-
+class PPOAgent(object):
+    def __init__(self, town, action_std_init=0.4, use_depth: bool = False, device: str = 'cpu'):
+        
+        #self.env = env
+        self.obs_dim = (1 + use_depth) * LATENT_DIMS + 5
+        self.action_dim = 2
+        self.clip = POLICY_EPSILON
+        self.gamma = GAMMA
+        self.n_updates_per_iteration = 7
+        self.lr = PPO_LEARNING_RATE
+        self.action_std = action_std_init
         self.memory = Buffer()
+        self.town = town
 
-        self.policy = ActorCritic(
-            ss_channels=self.ss_channels,
-            depth_channels=self.depth_channels,
-            nav_dim=navigation_dim,
-            action_dim=self.action_dim,
-            dropout=dropout
-        ).to(device)
+        self.device = device
+        
+        self.policy = ActorCritic(self.obs_dim, self.action_dim, self.action_std).to(device)
         self.optimizer = torch.optim.Adam([
-            {'params': self.policy.ss_head.parameters(), 'lr': self.lr},
-            {'params': self.policy.depth_head.parameters(), 'lr': self.lr},
-            {'params': self.policy.actor.parameters(), 'lr': self.lr},
-            {'params': self.policy.critic.parameters(), 'lr': self.lr},
-        ])
+                        {'params': self.policy.actor.parameters(), 'lr': self.lr},
+                        {'params': self.policy.critic.parameters(), 'lr': self.lr}])
 
-    def get_action(self, observation: Tuple[torch.Tensor, torch.Tensor, torch.Tensor], train: bool = True) -> np.ndarray:
+        self.old_policy = ActorCritic(self.obs_dim, self.action_dim, self.action_std).to(device)
+        self.old_policy.load_state_dict(self.policy.state_dict())
+        self.MseLoss = nn.MSELoss()
+
+
+    def get_action(self, observation, train=True):
 
         with torch.no_grad():
-            observation = tuple(obs.to(self.device) for obs in observation)
-            action, logprob = self.policy.get_action_and_logprobs(observation)
+            observation = observation.to(self.device)
+            action, logprob = self.old_policy.get_action_and_log_prob(observation)
         if train:
-            self.memory.ss_obs.append(observation[0])
-            self.memory.depth_obs.append(observation[1])
-            self.memory.nav_obs.append(observation[2])
+            self.memory.states.append(observation)
             self.memory.actions.append(action)
             self.memory.log_probs.append(logprob)
 
         return action.detach().cpu().numpy().flatten()
+    
+    def set_action_std(self, new_action_std):
+        self.action_std = new_action_std
+        self.policy.set_action_std(new_action_std)
+        self.old_policy.set_action_std(new_action_std)
+
+    
+    def decay_action_std(self, action_std_decay_rate, min_action_std):
+        self.action_std = self.action_std - action_std_decay_rate
+        if (self.action_std <= min_action_std):
+            self.action_std = min_action_std
+        self.set_action_std(self.action_std)
+        return self.action_std
+
 
     def learn(self):
-        
+
         # Monte Carlo estimate of returns
         rewards = []
         discounted_reward = 0
@@ -92,45 +86,46 @@ class PPOAgent:
             rewards.insert(0, discounted_reward)
             
         # Normalizing the rewards
-        rewards = torch.tensor(rewards, dtype=torch.float, device=self.device)
+        rewards = torch.tensor(rewards, dtype=torch.float32).to(self.device)
         rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-7)
-        
+
         # convert list to tensor
-        old_ss_states = torch.squeeze(torch.stack(self.memory.ss_obs, dim=0)).detach().to(self.device)
-        old_depth_states = torch.squeeze(torch.stack(self.memory.depth_obs, dim=0)).detach().to(self.device)
-        old_nav_states = torch.squeeze(torch.stack(self.memory.nav_obs, dim=0)).detach().to(self.device)
+        old_states = torch.squeeze(torch.stack(self.memory.states, dim=0)).detach().to(self.device)
         old_actions = torch.squeeze(torch.stack(self.memory.actions, dim=0)).detach().to(self.device)
         old_logprobs = torch.squeeze(torch.stack(self.memory.log_probs, dim=0)).detach().to(self.device)
 
-        for epoch in range(self.epoch_n):
-            idxs = np.random.permutation(old_nav_states.shape[0])
-            for i in range(0, old_nav_states.shape[0], self.batch_size):
-                idx = idxs[i:i + self.batch_size]
-                b_actions, b_rewards, b_old_logprobs = old_actions[idx], rewards[idx], old_logprobs[idx]
-                b_states = (old_ss_states[idx], old_depth_states[idx], old_nav_states[idx])
+        
+        # Optimize policy for K epochs
+        for _ in range(self.n_updates_per_iteration):
 
-                b_log_probs, b_values, b_dist_entropy = self.policy.evaluate(b_states, b_actions)
-                b_values = torch.squeeze(b_values)
+            # Evaluating old actions and values
+            logprobs, values, dist_entropy = self.policy.evaluate(old_states, old_actions)
 
-                ratio = torch.exp(b_log_probs - b_old_logprobs)
+            # match values tensor dimensions with rewards tensor
+            values = torch.squeeze(values)
+            
+            # Finding the ratio (pi_theta / pi_theta__old)
+            ratios = torch.exp(logprobs - old_logprobs.detach())
 
-                b_advantages = b_rewards - b_values.detach()
+            # Finding Surrogate Loss
+            advantages = rewards - values.detach()   
+            surr1 = ratios * advantages
+            surr2 = torch.clamp(ratios, 1-self.clip, 1+self.clip) * advantages
 
-                pi_loss1 = ratio * b_advantages
-                pi_loss2 = torch.clamp(ratio, 1.0 - self.epsilon, 1.0 + self.epsilon) * b_advantages
+            # final loss of clipped objective PPO
+            loss = -torch.min(surr1, surr2) + 0.5*self.MseLoss(values, rewards) - 0.01*dist_entropy
+            
+            # take gradient step
+            self.optimizer.zero_grad()
+            loss.mean().backward()
+            self.optimizer.step()
 
-                pi_loss = -torch.min(pi_loss1, pi_loss2)
-                v_loss = 0.5 * (b_advantages ** 2)
-
-                loss = (pi_loss + v_loss).mean()
-                loss.backward()
-                self.optimizer.step()
-                self.optimizer.zero_grad()
-
+        self.old_policy.load_state_dict(self.policy.state_dict())
         self.memory.clear()
 
     def save(self, path: str):
-        torch.save(self.policy.state_dict(), path)
+        torch.save(self.old_policy.state_dict(), path)
 
     def load(self, path: str):
+        self.old_policy.load_state_dict(torch.load(path, map_location='cpu'))
         self.policy.load_state_dict(torch.load(path, map_location='cpu'))

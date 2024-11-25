@@ -2,31 +2,24 @@ import torch
 from carla_drl.lane_following.model import ActorCritic
 
 
-SS_CHANNELS = 128
-DEPTH_CHANNELS = 128
-NAV_DIM = 5
+OBS_DIM = 100
 ACTION_DIM = 2
-DROPOUT = 0.1
+STD_INIT = 0.1
 
 def test_actor_critic_initialization():
     """Test the initialization of the ActorCritic class."""
     
-    model = ActorCritic(SS_CHANNELS, DEPTH_CHANNELS, NAV_DIM, ACTION_DIM, DROPOUT)
+    model = ActorCritic(OBS_DIM, ACTION_DIM, STD_INIT)
     
     assert model.action_dim == ACTION_DIM, "Action dimension is incorrect."
-    assert len(model.ss_head) > 0, "Semantic segmentation head is not initialized."
-    assert len(model.depth_head) > 0, "Depth head is not initialized."
     assert len(model.actor) > 0, "Actor head is not initialized."
     assert len(model.critic) > 0, "Critic head is not initialized."
 
 def test_actor_critic_forward():
     """Test the forward method of the ActorCritic class."""
-    model = ActorCritic(SS_CHANNELS, DEPTH_CHANNELS, NAV_DIM, ACTION_DIM, DROPOUT)
+    model = ActorCritic(OBS_DIM, ACTION_DIM, STD_INIT)
 
-    ss_obs = torch.randn(1, 128, 16, 30)
-    depth_obs = torch.randn(1, 128, 7, 12)
-    nav_obs = torch.randn(1, NAV_DIM)
-    observation = (ss_obs, depth_obs, nav_obs)
+    observation = torch.randn(1, 100)
     
     action, value = model(observation)
     
@@ -36,12 +29,9 @@ def test_actor_critic_forward():
 def test_get_value():
     """Test the get_value method of the ActorCritic class."""
 
-    model = ActorCritic(SS_CHANNELS, DEPTH_CHANNELS, NAV_DIM, ACTION_DIM, DROPOUT)
+    model = ActorCritic(OBS_DIM, ACTION_DIM, STD_INIT)
  
-    ss_obs = torch.randn(1, 128, 16, 30)
-    depth_obs = torch.randn(1, 128, 7, 12)
-    nav_obs = torch.randn(1, NAV_DIM)
-    observation = (ss_obs, depth_obs, nav_obs)
+    observation = torch.randn(1, 100)
     
     value = model.get_value(observation)
     
@@ -50,14 +40,11 @@ def test_get_value():
 def test_get_action_and_logprobs():
     """Test the get_action_and_logprobs method of the ActorCritic class."""
 
-    model = ActorCritic(SS_CHANNELS, DEPTH_CHANNELS, NAV_DIM, ACTION_DIM, DROPOUT)
+    model = ActorCritic(OBS_DIM, ACTION_DIM, STD_INIT)
 
-    ss_obs = torch.randn(1, 128, 16, 30)
-    depth_obs = torch.randn(1, 128, 7, 12)
-    nav_obs = torch.randn(1, NAV_DIM)
-    observation = (ss_obs, depth_obs, nav_obs)
+    observation = torch.randn(1, 100)
     
-    action, log_prob = model.get_action_and_logprobs(observation)
+    action, log_prob = model.get_action_and_log_prob(observation)
     
     assert action.shape == (1, ACTION_DIM), "Action output shape from get_action_and_logprobs is incorrect."
     assert log_prob.shape == (1,), "Log probability output shape is incorrect."
@@ -65,12 +52,9 @@ def test_get_action_and_logprobs():
 def test_evaluate():
     """Test the evaluate method of the ActorCritic class."""
 
-    model = ActorCritic(SS_CHANNELS, DEPTH_CHANNELS, NAV_DIM, ACTION_DIM, DROPOUT)
+    model = ActorCritic(OBS_DIM, ACTION_DIM, STD_INIT)
 
-    ss_obs = torch.randn(1, 128, 16, 30)
-    depth_obs = torch.randn(1, 128, 7, 12)
-    nav_obs = torch.randn(1, NAV_DIM)
-    observation = (ss_obs, depth_obs, nav_obs)
+    observation = torch.randn(1, 100)
     
     action = torch.randn(1, ACTION_DIM)  # Mock action
     log_prob, values, dist_entropy = model.evaluate(observation, action)

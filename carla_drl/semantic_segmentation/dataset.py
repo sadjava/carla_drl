@@ -68,7 +68,6 @@ class CarlaSemanticSegmentationDataset(Dataset):
         self.root = root
         self.joint_transform = joint_transform
         self.input_transform = input_transform
-        print(os.path.join(root, "rgb", "*.png"))
         self.images = sorted(glob.glob(os.path.join(root, "rgb", "*", "*", "*.png")))
         self.labels = sorted(glob.glob(os.path.join(root, "semseg", "*", "*", "*.png")))
         for image, label in zip(self.images, self.labels):

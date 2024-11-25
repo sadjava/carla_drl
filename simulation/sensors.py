@@ -3,16 +3,52 @@ import numpy as np
 import weakref
 import pygame
 from simulation.connection import carla
-from simulation.settings import RGB_CAMERA, IMAGE_SIZE_X, IMAGE_SIZE_Y
-
+from carla import ColorConverter
+from simulation.settings import RGB_CAMERA, SS_CAMERA, DEPTH_CAMERA, IMAGE_SIZE_X, IMAGE_SIZE_Y
+import time
+from PIL import Image
 # ---------------------------------------------------------------------|
 # ---------------------------- RGB CAMERA -----------------------------|
 # ---------------------------------------------------------------------|
 
-class CameraSensor():
+class SemsegSensor():
 
     def __init__(self, vehicle):
-        self.sensor_name = RGB_CAMERA
+        self.sensor_name = SS_CAMERA
+        self.parent = vehicle
+        self.front_camera = list()
+        world = self.parent.get_world()
+        self.sensor = self._set_camera_sensor(world)
+        weak_self = weakref.ref(self)
+        self.sensor.listen(
+            lambda image: CameraSensor._get_front_camera_data(weak_self, image))
+
+    # Main front camera is setup and provide the visual observations for our network.
+    def _set_camera_sensor(self, world):
+        T_vehicle_camera = carla.Transform(carla.Location(x=1, y=0, z=3), carla.Rotation(pitch=10, roll=0, yaw=0))
+        front_camera_bp = world.get_blueprint_library().find(self.sensor_name)
+        front_camera_bp.set_attribute('image_size_x', f'{IMAGE_SIZE_X}')
+        front_camera_bp.set_attribute('image_size_y', f'{IMAGE_SIZE_Y}')
+        front_camera_bp.set_attribute('fov', f'110')
+        front_camera = world.spawn_actor(front_camera_bp, T_vehicle_camera, attach_to=self.parent)
+        return front_camera
+
+    @staticmethod
+    def _get_front_camera_data(weak_self, image):
+        self = weak_self()
+        if not self:
+            return
+        image = image.convert(ColorConverter.CityScapesPalette)
+        placeholder = np.frombuffer(image.raw_data, dtype=np.dtype("uint8"))
+        placeholder1 = placeholder.reshape((image.width, image.height, 4))
+        placeholder2 = placeholder1[:, :, :3]
+        placeholder2 = placeholder2[:, :, ::-1]
+        self.front_camera.append(placeholder2.swapaxes(0, 1))
+
+class DepthSensor():
+
+    def __init__(self, vehicle):
+        self.sensor_name = DEPTH_CAMERA
         self.parent = vehicle
         self.front_camera = list()
         world = self.parent.get_world()
@@ -42,6 +78,39 @@ class CameraSensor():
         placeholder2 = placeholder2[:, :, ::-1]
         self.front_camera.append(placeholder2.swapaxes(0, 1))
 
+class CameraSensor():
+
+    def __init__(self, vehicle):
+        self.sensor_name = RGB_CAMERA
+        self.parent = vehicle
+        self.front_camera = list()
+        world = self.parent.get_world()
+        self.sensor = self._set_camera_sensor(world)
+        weak_self = weakref.ref(self)
+        self.sensor.listen(
+            lambda image: CameraSensor._get_front_camera_data(weak_self, image))
+
+    # Main front camera is setup and provide the visual observations for our network.
+    def _set_camera_sensor(self, world):
+        T_vehicle_camera = carla.Transform(carla.Location(x=1, y=0, z=3), carla.Rotation(pitch=10, roll=0, yaw=0))
+        front_camera_bp = world.get_blueprint_library().find(self.sensor_name)
+        front_camera_bp.set_attribute('image_size_x', f'{IMAGE_SIZE_X}')
+        front_camera_bp.set_attribute('image_size_y', f'{IMAGE_SIZE_Y}')
+        front_camera_bp.set_attribute('fov', f'110')
+        front_camera_bp.set_attribute('motion_blur_max_distortion', '0')
+        front_camera = world.spawn_actor(front_camera_bp, T_vehicle_camera, attach_to=self.parent)
+        return front_camera
+
+    @staticmethod
+    def _get_front_camera_data(weak_self, image):
+        self = weak_self()
+        if not self:
+            return
+        placeholder = np.frombuffer(image.raw_data, dtype=np.dtype("uint8"))
+        placeholder1 = placeholder.reshape((image.height, image.width, 4))
+        placeholder2 = placeholder1[:, :, :3]
+        placeholder2 = placeholder2[:, :, ::-1]
+        self.front_camera.append(placeholder2)
 
 # ---------------------------------------------------------------------|
 # ---------------------------- ENV CAMERA -----------------------------|
@@ -52,6 +121,9 @@ class CameraSensorEnv:
     def __init__(self, vehicle):
 
         pygame.init()
+        self.images = []
+        self.record = False
+        self.start_time = time.time()
         self.display = pygame.display.set_mode((720, 720),pygame.HWSURFACE | pygame.DOUBLEBUF)
         self.sensor_name = RGB_CAMERA
         self.parent = vehicle
@@ -80,8 +152,22 @@ class CameraSensorEnv:
         array = np.frombuffer(image.raw_data, dtype=np.dtype("uint8"))
         placeholder1 = array.reshape((image.width, image.height, 4))
         placeholder2 = placeholder1[:, :, :3]
-        placeholder2 = placeholder2[:, :, ::-1]
-        self.surface = pygame.surfarray.make_surface(placeholder2.swapaxes(0, 1))
+        placeholder2 = placeholder2[:, :, ::-1].swapaxes(0, 1)
+        
+        # t = time.time()
+        # if len(self.images) == 0 and t - self.start_time > 40:
+        #     self.start_time = t
+        #     self.record = True
+            
+        # if self.record:
+        #     if len(self.images) == 0:
+        #         self.start_time = time.time()
+        #     self.images.append(Image.fromarray(placeholder2.copy().swapaxes(0, 1)))
+        #     duration = time.time() - self.start_time
+        #     if duration > 10:
+        #         self.record = False
+        #         self.images[0].save('info/gifs/third_person.gif', save_all=True, duration=duration, append_images=self.images[1:], optimize=True, quality=0.2, loop=0)
+        self.surface = pygame.surfarray.make_surface(placeholder2)
         self.display.blit(self.surface, (0, 0))
         pygame.display.flip()
 

@@ -22,17 +22,24 @@ from simulation.environment import CarlaEnvironment
 def parse_args():
     
     parser = argparse.ArgumentParser()
-    parser.add_argument('--exp-name', type=str, default='im20_480x270', help='name of the experiment')
-    parser.add_argument('--ss_model_path', type=str, default=SS_MODEL_PATH, help='path to semantic segmentation model')
-    parser.add_argument('--depth_model_path', type=str, default=DEPTH_MODEL_PATH, help='path to depth estimation model')
-    parser.add_argument('--image_size', type=int, nargs=2, default=[480, 270], help='image size')
+    parser.add_argument('--exp-name', type=str, default='im20_160x80', help='name of the experiment')
+    parser.add_argument('--ss-model-path', type=str, default=SS_MODEL_PATH, help='path to semantic segmentation model')
+    parser.add_argument('--ss-ae-model-path', type=str, default=SS_AE_MODEL_PATH, help='path to depth estimation model')
+    parser.add_argument('--de-ae-model-path', type=str, default=DE_AE_MODEL_PATH, help='path to depth estimation model')
+    parser.add_argument('--image-size', type=int, nargs=2, default=[160, 80], help='image size')
     
     parser.add_argument('--train', default=True, type=bool, help='is it training?')
+    parser.add_argument('--use-depth', default=False, type=bool, help='use gt depth?')
     parser.add_argument('--learning-frequency', type=int, default=LEARN_FREQUENCY, help='learning frequency')
     parser.add_argument('--learning-rate', type=float, default=PPO_LEARNING_RATE, help='learning rate of the optimizer')
     parser.add_argument('--total-timesteps', type=int, default=TOTAL_TIMESTEPS, help='total timesteps of the experiment')
     parser.add_argument('--test-timesteps', type=int, default=TEST_TIMESTEPS, help='timesteps to test our model')
     parser.add_argument('--episode-length', type=int, default=EPISODE_LENGTH, help='max timesteps in an episode')
+
+    parser.add_argument('--action-std-init', type=int, default=ACTION_STD_INIT, help='max timesteps in an episode')
+    parser.add_argument('--action-std-decay-rate', type=int, default=ACTION_STD_DECAY_RATE, help='max timesteps in an episode')
+    parser.add_argument('--min-action-std', type=int, default=MIN_ACTION_STD, help='max timesteps in an episode')
+    parser.add_argument('--action-std-decay-freq', type=int, default=ACTION_STD_DECAY_FREQ, help='max timesteps in an episode')
 
     parser.add_argument('--env-checkpoint-frequency', type=int, default=ENV_CHECKPOINT_FREQUENCY, help='frequency of checkpointing route')
     parser.add_argument('--logging-frequency', type=int, default=LOGGING_FREQUENCY, help='frequency of logging')
@@ -75,14 +82,6 @@ def runner():
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}" for key, value in vars(args).items()])))
 
-
-    #Seeding to reproduce the results 
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    torch.backends.cudnn.deterministic = args.torch_deterministic
-
-    
     timestep = 0
     episode = 0
     cumulative_score = 0
@@ -90,12 +89,39 @@ def runner():
     scores = list()
     deviation_from_center = 0
     distance_covered = 0
+    action_std_init = args.action_std_init
 
+    #Seeding to reproduce the results 
+    if args.checkpoint_path:
+        with open(os.path.join(args.checkpoint_path, 'checkpoint', CHECKPOINT_FILE), 'rb') as f:
+            data = pickle.load(f)
+            episode = data['episode']
+            timestep = data['timestep']
+            cumulative_score = data['cumulative_score']
+            action_std_init = data['action_std_init']
+            
+            # Load random state
+            random.setstate(data['random_state'])
+            np.random.set_state(data['np_random_state'])
+            torch.set_rng_state(data['torch_random_state'])
+
+            # Load current town and weather
+            town = data['town']
+            weather = data['weather']
+    else:
+        random.seed(args.seed)
+        np.random.seed(args.seed)
+        torch.manual_seed(args.seed)
+        torch.backends.cudnn.deterministic = args.torch_deterministic
+        town = random.choice(TOWN_LIST)
+        weather = random.choice(WEATHER_LIST)
+        # town = TOWN_LIST[0]
+        # weather = WEATHER_LIST[0]
+    town = "Town02_Opt"
+    weather = "ClearNoon"
     #========================================================================
     #                           CREATING THE SIMULATION
     #========================================================================
-    weather_dict = dict([(name, param) for name, param in carla.WeatherParameters.__dict__.items() if isinstance(param, carla.WeatherParameters)])
-    town = random.choice(TOWN_LIST)
     try:
         client, world = ClientConnection(town).setup()
         logging.info("Connection has been setup successfully.")
@@ -105,9 +131,13 @@ def runner():
 
     if not args.train:
         args.env_checkpoint_frequency = None
-    env = CarlaEnvironment(client, world, town, checkpoint_frequency=args.env_checkpoint_frequency)
-    encoder = ObservationEncoder(args.ss_model_path, args.depth_model_path, (args.image_size[1], args.image_size[0]))
-
+    env = CarlaEnvironment(client, world, town, weather, use_depth=args.use_depth,
+                           checkpoint_frequency=args.env_checkpoint_frequency)
+    encoder = ObservationEncoder(args.ss_model_path, args.ss_ae_model_path, 
+                                 args.de_ae_model_path, 
+                                 (args.image_size[1], args.image_size[0]), 
+                                 use_depth=args.use_depth,
+                                 latent_dims=LATENT_DIMS, device=device)
 
     #========================================================================
     #                           ALGORITHM
@@ -115,20 +145,12 @@ def runner():
     try:
         time.sleep(0.5)
         agent = PPOAgent(
-            ss_channels=encoder.ss_model.enc4.out_channels,
-            depth_channels=encoder.depth_model.scratch.layer4_rn.out_channels,
-            navigation_dim=5, device=device
+            town, action_std_init=action_std_init, use_depth=args.use_depth, device=device
         )
 
         if args.checkpoint_path:
             agent.load(os.path.join(args.checkpoint_path, 'policy', AGENT_FILE))
         
-            with open(os.path.join(args.checkpoint_path, 'checkpoint', CHECKPOINT_FILE), 'rb') as f:
-                data = pickle.load(f)
-                episode = data['episode']
-                timestep = data['timestep']
-                cumulative_score = data['cumulative_score']
-
         if not args.train:
             agent.load(os.path.join(args.checkpoint_path, 'policy', AGENT_FILE))
             for params in agent.old_policy.actor.parameters():
@@ -186,7 +208,18 @@ def runner():
                     agent.learn()
                     agent.save(os.path.join(log_dir, 'policy', AGENT_FILE))
                     chkpt_file = os.path.join(log_dir, 'checkpoint', CHECKPOINT_FILE)
-                    data_obj = {'cumulative_score': cumulative_score, 'episode': episode, 'timestep': timestep}
+                    # Save random state and environment state
+                    data_obj = {
+                        'cumulative_score': cumulative_score,
+                        'episode': episode,
+                        'timestep': timestep,
+                        'action_std_init': action_std_init,
+                        'random_state': random.getstate(),
+                        'np_random_state': np.random.get_state(),
+                        'torch_random_state': torch.get_rng_state(),  # Get the current PyTorch RNG state
+                        'town': env.town,  # Save the current town
+                        'weather': env.weather  # Save the current weather
+                    }
                     with open(chkpt_file, 'wb') as handle:
                         pickle.dump(data_obj, handle)
                     
@@ -209,10 +242,14 @@ def runner():
                     deviation_from_center = 0
                     distance_covered = 0
                 
-                if episode % args.map_frequency == 0:
-                    env.change_town(random.choice(TOWN_LIST))
-                if episode % args.weather_frequency == 0:
-                    env.change_weather(weather_dict[random.choice(WEATHER_LIST)])
+
+                if timestep % args.action_std_decay_freq == 0:
+                    action_std_init =  agent.decay_action_std(args.action_std_decay_rate, args.min_action_std)
+
+                # if episode % args.map_frequency == 0:
+                #     env.change_town(random.choice(TOWN_LIST))
+                # if episode % args.weather_frequency == 0:
+                #     env.change_weather(random.choice(WEATHER_LIST))
                         
             print("Terminating the run.")
             sys.exit()

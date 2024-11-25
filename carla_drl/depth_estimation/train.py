@@ -29,13 +29,13 @@ def setup_logging():
 def parse_args():
     parser = argparse.ArgumentParser(description='Depth Estimation Training with MiDaS')
     parser.add_argument('--ckpt_path', default='results/depth_estimation', help='path to save checkpoints')
-    parser.add_argument('--exp_name', default='im20_480x270', help='experiment name')
+    parser.add_argument('--exp_name', default='im20_160x80', help='experiment name')
     parser.add_argument('--root', default='data_480x270', help='path to the dataset root directory')
     parser.add_argument('--train_batch_size', type=int, default=16, help='training batch size')
-    parser.add_argument('--epoch_num', type=int, default=100, help='number of epochs')
+    parser.add_argument('--epoch_num', type=int, default=500, help='number of epochs')
     parser.add_argument('--lr', type=float, default=1e-3, help='learning rate')
     parser.add_argument('--weight_decay', type=float, default=1e-4, help='weight decay')
-    parser.add_argument('--input_size', type=int, nargs=2, default=[480, 270], help='input image size')
+    parser.add_argument('--input_size', type=int, nargs=2, default=[160, 80], help='input image size')
     parser.add_argument('--momentum', type=float, default=0.95, help='momentum')
     parser.add_argument('--lr_patience', type=int, default=10, help='learning rate patience')
     parser.add_argument('--snapshot', default='', help='path to pretrained model snapshot')
@@ -121,7 +121,7 @@ def main(args: argparse.Namespace):
         optimizer.param_groups[0]['lr'] = 2 * args.lr
         optimizer.param_groups[1]['lr'] = args.lr
 
-    scheduler = ReduceLROnPlateau(optimizer, 'min', patience=args.lr_patience, min_lr=1e-10)
+    scheduler = ReduceLROnPlateau(optimizer, 'min', factor=0.9, patience=args.lr_patience, min_lr=1e-10)
     criterion = torch.nn.MSELoss()
 
     for epoch in range(curr_epoch, args.epoch_num + 1):

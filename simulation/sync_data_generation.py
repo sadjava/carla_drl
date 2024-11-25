@@ -33,6 +33,7 @@ try:
 except ImportError:
     import Queue as queue
 
+import time
 
 class CarlaSyncMode(object):
     """
@@ -142,7 +143,7 @@ def main(display_enabled=False, record=True, record_fps=6, sizeX=480, sizeY=270,
     client.set_timeout(10.0)
 
     # Iterate over all towns
-    towns = [t for t in client.get_available_maps() if t.endswith("Opt")]
+    towns = ["Town02_Opt"]
     print(f"Available towns: {towns}")
     for town in towns:
         print(f"Loading town: {town}")
@@ -150,12 +151,12 @@ def main(display_enabled=False, record=True, record_fps=6, sizeX=480, sizeY=270,
         world = client.get_world()
 
         # Iterate over all weather presets
-        weather_presets = [(name, param) for name, param in carla.WeatherParameters.__dict__.items() if isinstance(param, carla.WeatherParameters)]
+        weather_presets = [(name, param) for name, param in carla.WeatherParameters.__dict__.items() if isinstance(param, carla.WeatherParameters) and name == "ClearNoon"]
         for weather_name, weather_param in weather_presets:
             # Check if the path for this town and weather combination already exists
             town_name = os.path.basename(town)  # Extracts the name of the town from the path
             base_path = f'data_{sizeX}x{sizeY}/rgb/{town_name}/{weather_name}'
-            if os.path.exists(base_path):
+            if not display and os.path.exists(base_path):
                 print(f"Skipping {town_name} with weather {weather_name} as data already exists.")
                 continue
 
@@ -171,7 +172,7 @@ def main(display_enabled=False, record=True, record_fps=6, sizeX=480, sizeY=270,
                 vehicle_bp = blueprint_library.find('vehicle.audi.tt')
                 vehicle = None
                 for attempt in range(10):  # Try up to 10 different spawn points
-                    spawn_point = random.choice(spawn_points)
+                    spawn_point = spawn_points[1]
                     vehicle = world.try_spawn_actor(vehicle_bp, spawn_point)
                     if vehicle:
                         actor_list.append(vehicle)
@@ -182,23 +183,23 @@ def main(display_enabled=False, record=True, record_fps=6, sizeX=480, sizeY=270,
                     print("Failed to spawn main vehicle after 10 attempts.")
                     continue
 
-                # Spawn additional vehicles
-                num_vehicles = 5
-                for i in range(num_vehicles):
-                    spawn_point = random.choice(spawn_points)
-                    vehicle_bp = random.choice(blueprint_library.filter('vehicle.*'))
-                    additional_vehicle = world.try_spawn_actor(vehicle_bp, spawn_point)
-                    if additional_vehicle:
-                        actor_list.append(additional_vehicle)
+                # # Spawn additional vehicles
+                # num_vehicles = 5
+                # for i in range(num_vehicles):
+                #     spawn_point = random.choice(spawn_points)
+                #     vehicle_bp = random.choice(blueprint_library.filter('vehicle.*'))
+                #     additional_vehicle = world.try_spawn_actor(vehicle_bp, spawn_point)
+                #     if additional_vehicle:
+                #         actor_list.append(additional_vehicle)
 
-                # Spawn pedestrians
-                num_pedestrians = 10
-                walker_bp = random.choice(blueprint_library.filter('walker.pedestrian.*'))
-                for i in range(num_pedestrians):
-                    spawn_point = random.choice(spawn_points)
-                    pedestrian = world.try_spawn_actor(walker_bp, spawn_point)
-                    if pedestrian:
-                        actor_list.append(pedestrian)
+                # # Spawn pedestrians
+                # num_pedestrians = 10
+                # walker_bp = random.choice(blueprint_library.filter('walker.pedestrian.*'))
+                # for i in range(num_pedestrians):
+                #     spawn_point = random.choice(spawn_points)
+                #     pedestrian = world.try_spawn_actor(walker_bp, spawn_point)
+                #     if pedestrian:
+                #         actor_list.append(pedestrian)
 
                 # Attach cameras to the main vehicle
                 camera_rgb = world.spawn_actor(
@@ -225,6 +226,17 @@ def main(display_enabled=False, record=True, record_fps=6, sizeX=480, sizeY=270,
                 current_location = vehicle.get_location()
                 waypoint = m.get_waypoint(current_location)
 
+
+                # route_waypoints = list()
+                # waypoint = m.get_waypoint(vehicle.get_location(), project_to_road=True, lane_type=(carla.LaneType.Driving))
+                # current_waypoint = waypoint
+                # route_waypoints.append(current_waypoint)
+                # for x in range(780):
+                #     next_waypoint = current_waypoint.next(1.0)[-1]
+                #     current_waypoint = next_waypoint
+                #     route_waypoints.append(current_waypoint)
+                # waypoint_index = 0
+
                 # Create a synchronous mode context.
                 with CarlaSyncMode(world, camera_rgb, camera_depth, camera_semseg, fps=30) as sync_mode:
                     while counter < max_images:
@@ -237,9 +249,25 @@ def main(display_enabled=False, record=True, record_fps=6, sizeX=480, sizeY=270,
                         if not next_waypoints:
                             print("No more waypoints available, breaking loop.")
                             break
-                        waypoint = random.choice(next_waypoints)
-                        vehicle.set_transform(waypoint.transform)
+                        # waypoint = random.choice(next_waypoints)
+                        # noise_l = np.random.randn(2)
+                        # noise_y = np.random.randn(1) * 30
+                        # new_transform = carla.libcarla.Transform(
+                        #     location=carla.libcarla.Location(
+                        #         x=waypoint.transform.location.x + noise_l[0], 
+                        #         y=waypoint.transform.location.y + noise_l[1], 
+                        #         z=waypoint.transform.location.z),
+                        #     rotation=carla.libcarla.Rotation(
+                        #         pitch=waypoint.transform.rotation.pitch, 
+                        #         yaw=waypoint.transform.rotation.yaw + noise_y[0], 
+                        #         roll=waypoint.transform.rotation.roll),
+                        # )
+                        # vehicle.set_transform(new_transform)
 
+                        # waypoint_index += 1
+                        # vehicle.set_transform(route_waypoints[waypoint_index].transform)
+                        waypoint = np.random.choice(next_waypoints)
+                        vehicle.set_transform(waypoint.transform)
                         fps = round(1.0 / snapshot.timestamp.delta_seconds)
 
                         if tick_counter % (30 // record_fps) == 0:
@@ -269,15 +297,18 @@ def main(display_enabled=False, record=True, record_fps=6, sizeX=480, sizeY=270,
                         if display_enabled:
                             # Draw the display.
                             draw_image(display, image_rgb)
-                            draw_image(display, image_depth, blend=True)
+                            # draw_image(display, image_depth, blend=True)
                             display.blit(
                                 font.render(f'{clock.get_fps():5.2f} FPS (real)', True, (255, 255, 255)),
                                 (8, 10))
                             display.blit(
                                 font.render(f'{fps:5.2f} FPS (simulated)', True, (255, 255, 255)),
                                 (8, 28))
+                            # display.blit(
+                            #     font.render(f'{waypoint_index:5.2f} X', True, (255, 255, 255)),
+                            #     (8, 46))
                             pygame.display.flip()
-
+                            # time.sleep(0.5)
                         tick_counter += 1
 
             finally:
@@ -299,7 +330,7 @@ if __name__ == '__main__':
     parser.add_argument('--width', type=int, default=480, help='Width of the camera image')
     parser.add_argument('--height', type=int, default=270, help='Height of the camera image')
     parser.add_argument('--fov', type=int, default=110, help='Field of view for the camera')
-    parser.add_argument('--max-images', type=int, default=20, help='Maximum number of images to capture')
+    parser.add_argument('--max-images', type=int, default=2000, help='Maximum number of images to capture')
     parser.add_argument('--batch-size', type=int, default=10, help='Batch size for saving images')
 
     args = parser.parse_args()
