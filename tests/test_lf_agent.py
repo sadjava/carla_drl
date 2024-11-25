@@ -7,7 +7,7 @@ def test_get_action():
     """Test the get_action method of the PPOAgent class."""
     agent = PPOAgent("Town02")
     
-    obs = torch.randn(1, 100)
+    obs = torch.randn(1, 55)
     
     action = agent.get_action(obs)
     
@@ -20,7 +20,7 @@ def test_learn():
     
     # Simulate adding data to the memory
     for _ in range(8):
-        agent.memory.states.append(torch.randn(1, 100))
+        agent.memory.states.append(torch.randn(1, 55))
         agent.memory.actions.append(torch.randn(1, 2))
         agent.memory.log_probs.append(torch.randn(1,))
         agent.memory.rewards.append(1.0)
